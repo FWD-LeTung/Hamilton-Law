@@ -516,6 +516,7 @@ dependencies = [
     { name = "ipykernel" },
     { name = "langchain-core" },
     { name = "polars" },
+    { name = "psutil" },
 ]
 
 [package.metadata]
@@ -525,6 +526,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "langchain-core", specifier = ">=1.4.8" },
     { name = "polars", specifier = ">=1.42.1" },
+    { name = "psutil", specifier = ">=7.2.2" },
 ]
 
 [[package]]

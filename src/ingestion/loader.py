@@ -5,6 +5,11 @@ from pathlib import Path
 from langchain_core.documents import Document
 from huggingface_hub import snapshot_download
 
+import psutil
+process = psutil.Process(os.getpid())
+def mem():
+    return process.memory_info().rss/1024/1024
+
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_PATH = PROJECT_ROOT / "data"
@@ -18,9 +23,11 @@ def download_dataset():
 
 def load_documents():
     docs =[]
+    print("Before read parquet:", mem(), "MB")
     content_df = pl.read_parquet(DATA_PATH / "data" / "content.parquet")
     metadata_df = pl.read_parquet(DATA_PATH / "data" / "metadata.parquet")
-    relationships_df = pl.read_parquet(DATA_PATH / "data" / "relationships.parquet")
+    print("After read parquet:", mem(), "MB")
+    #relationships_df = pl.read_parquet(DATA_PATH / "data" / "relationships.parquet")
     meta_small = metadata_df.select(["id", "title",  
                                      pl.col("loai_van_ban").alias("doc_type"), 
                                      pl.col("co_quan_ban_hanh").alias("authority"), 
@@ -28,12 +35,14 @@ def load_documents():
                                      pl.col("ngay_co_hieu_luc").alias("effective_date"), 
                                      pl.col("tinh_trang_hieu_luc").alias("status")
                                      ])
+    meta_small = meta_small.with_columns(pl.col("id").cast(pl.Utf8))
     df_merged = content_df.join(meta_small, on="id", how="left")
-    
-    for row in df_merged.iter_rows(named=True):
+    print("After Merged:", mem(), "MB")
+    print("Start load docs")
+    for i, row in enumerate(df_merged.iter_rows(named=True)):
         docs.append(
             Document(
-                page_content=row["content"], 
+                page_content=row["content_html"], 
                 metadata = {
                     key: value
                     for key, value in row.items()
@@ -41,5 +50,8 @@ def load_documents():
                 }
             )
         )
-    
+        if i % 50000 == 0:
+            print(i, mem(), "MB")
     return docs
+
+load_documents()
