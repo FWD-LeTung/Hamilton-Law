@@ -1,14 +1,10 @@
 import os
 import polars as pl
-from pathlib import Path
+import pyarrow.parquet as pq
 
+from pathlib import Path
 from langchain_core.documents import Document
 from huggingface_hub import snapshot_download
-
-import psutil
-process = psutil.Process(os.getpid())
-def mem():
-    return process.memory_info().rss/1024/1024
 
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -22,40 +18,44 @@ def download_dataset():
         local_dir=DATA_PATH
     )
 
-def load_documents():
-    
-    df_merged = (
-        pl.scan_parquet(CONTENT_PATH)
-        .join(
-            pl.scan_parquet(METADATA_PATH), 
-            on="id", 
-            how="left"
+def load_documents(batch_size: int = 10_000):
+    metadata_df = (
+        pl.read_parquet(METADATA_PATH)
+        .with_columns(pl.col("id").cast(pl.Utf8))
+    )
+
+    content_pf = pq.ParquetFile(CONTENT_PATH)
+
+    for batch in content_pf.iter_batches(
+        batch_size=batch_size,
+        columns=["id", "content_html"],
+    ):
+        content_chunk = (
+            pl.from_arrow(batch)
+            .with_columns(pl.col("id").cast(pl.Utf8))
         )
-    ).select(["id", "title", 
-              pl.col("loai_van_ban").alias("doc_type"), 
-              pl.col("co_quan_ban_hanh").alias("authority"), 
-              pl.col("ngay_ban_hanh").alias("issue_date"), 
-              pl.col("ngay_co_hieu_luc").alias("effective_date"), 
-              pl.col("tinh_trang_hieu_luc").alias("status")
-    ])
 
+        df_merged = (
+            content_chunk
+            .join(metadata_df, on="id", how="left")
+            .select([
+                "id",
+                "title",
+                "content_html",
+                pl.col("loai_van_ban").alias("doc_type"),
+                pl.col("co_quan_ban_hanh").alias("authority"),
+                pl.col("ngay_ban_hanh").alias("issue_date"),
+                pl.col("ngay_co_hieu_luc").alias("effective_date"),
+                pl.col("tinh_trang_hieu_luc").alias("status"),
+            ])
+        )
 
-    df = (pl.scan_parquet())
-    print("After Merged:", mem(), "MB")
-    print("Start load docs")
-    for i, row in enumerate(df_merged.iter_rows(named=True)):
-        docs.append(
-            Document(
-                page_content=row["content_html"], 
-                metadata = {
-                    key: value
-                    for key, value in row.items()
-                    if key != "content"
-                }
+        for row in df_merged.iter_rows(named=True):
+            yield Document(
+                page_content=row["content_html"],
+                metadata={
+                    k: v
+                    for k, v in row.items()
+                    if k != "content_html"
+                },
             )
-        )
-        if i % 50000 == 0:
-            print(i, mem(), "MB")
-    return docs
-
-load_documents()
